@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
-import { Box, CssBaseline, ThemeProvider, createTheme } from '@mui/material'
+import { Box, CssBaseline, ThemeProvider, createTheme, Container } from '@mui/material'
 import OrderManager from './components/OrderManager'
 import MenuManager from './components/MenuManager'
 import TopBar from './components/TopBar'
 import Sidebar from './components/Sidebar'
-import NewOrder from './components/NewOrder'
+import NeighborhoodManager from './components/NeighborhoodManager'
 import { DragDropContext } from 'react-beautiful-dnd'
 
 const theme = createTheme({
@@ -65,8 +65,7 @@ const theme = createTheme({
 
 function App() {
   const [currentView, setCurrentView] = useState('orders')
-  const [openNewOrder, setOpenNewOrder] = useState(false)
-  const [orderFilter, setOrderFilter] = useState('all') // 'all', 'delivery', 'pickup', 'dinein'
+  const [orderFilter, setOrderFilter] = useState('all')
   const [categories, setCategories] = useState(() => {
     const savedCategories = localStorage.getItem('categories')
     return savedCategories ? JSON.parse(savedCategories) : [
@@ -88,53 +87,124 @@ function App() {
       }
     ]
   })
+  
   const [orders, setOrders] = useState({
-    analysis: [
-      { id: '1', details: 'Pizza Margherita - Mesa 5' },
-      { id: '2', details: 'Hambúrguer Duplo - Delivery' }
-    ],
-    production: [
-      { id: '3', details: 'Salada Caesar - Mesa 3' }
-    ],
-    ready: [
-      { id: '4', details: 'Refrigerante 2L - Delivery' }
-    ]
+    'EM ANÁLISE': [],
+    'EM PRODUÇÃO': [],
+    'PRONTO': []
   })
 
-  const handleDragEnd = (result) => {
-    if (!result.destination) return
-
-    const { source, destination } = result
-    const sourceList = [...orders[source.droppableId]]
-    const destList = [...orders[destination.droppableId]]
-    const [removed] = sourceList.splice(source.index, 1)
-    destList.splice(destination.index, 0, removed)
-
-    setOrders({
-      ...orders,
-      [source.droppableId]: sourceList,
-      [destination.droppableId]: destList
-    })
+  // Carregar pedidos do backend
+  const loadOrders = async () => {
+    try {
+      const response = await fetch('http://localhost:8080/api/orders')
+      if (!response.ok) {
+        throw new Error('Failed to fetch orders')
+      }
+      const data = await response.json()
+      console.log('Pedidos carregados:', data)
+      
+      // Organizar pedidos por status
+      const organizedOrders = {
+        'EM ANÁLISE': [],
+        'EM PRODUÇÃO': [],
+        'PRONTO': []
+      }
+      
+      data.forEach(order => {
+        if (order.status && organizedOrders[order.status]) {
+          organizedOrders[order.status].push(order)
+        } else {
+          console.warn('Pedido com status inválido:', order)
+        }
+      })
+      
+      console.log('Pedidos organizados:', organizedOrders)
+      setOrders(organizedOrders)
+    } catch (error) {
+      console.error('Error loading orders:', error)
+    }
   }
 
-  const handleNewOrder = (orderData) => {
-    if (orderData) {
-      const newOrderId = Date.now().toString()
-      const orderDetails = `${orderData.customerName} - ${orderData.items.map(item => `${item.quantity}x ${item.name}`).join(', ')}`
-      
-      setOrders(prev => ({
-        ...prev,
-        analysis: [...prev.analysis, { 
-          id: newOrderId, 
-          details: orderDetails,
-          customerName: orderData.customerName,
-          deliveryType: orderData.deliveryType,
-          items: orderData.items,
-          total: orderData.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)
-        }]
-      }))
+  // Carregar pedidos ao iniciar
+  useEffect(() => {
+    loadOrders()
+  }, [])
+
+  const handleDragEnd = async (result) => {
+    if (!result.destination) return;
+
+    const { source, destination } = result;
+    const orderId = result.draggableId;
+
+    try {
+      const response = await fetch(`http://localhost:8080/api/orders/${orderId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          newStatus: destination.droppableId
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update order status');
+      }
+
+      // Refresh orders after successful update
+      // You might want to implement a more optimistic update approach
+      window.location.reload();
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      // You might want to show an error message to the user
     }
-    setOpenNewOrder(false)
+  };
+
+  const handleStatusChange = async (orderId, currentStatus, newStatus) => {
+    try {
+      // Atualizar no backend
+      const response = await fetch(`http://localhost:8080/api/orders/${orderId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: newStatus })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to update order status')
+      }
+
+      // Atualizar estado local
+      setOrders(prev => {
+        const updatedOrders = { ...prev }
+        const orderIndex = updatedOrders[currentStatus].findIndex(order => order.id === orderId)
+        
+        if (orderIndex !== -1) {
+          // Remover da lista atual
+          const [movedOrder] = updatedOrders[currentStatus].splice(orderIndex, 1)
+          
+          // Atualizar status e adicionar à nova lista
+          movedOrder.status = newStatus
+          updatedOrders[newStatus] = [...(updatedOrders[newStatus] || []), movedOrder]
+        }
+        
+        return updatedOrders
+      })
+    } catch (error) {
+      console.error('Error updating order status:', error)
+      // Recarregar pedidos em caso de erro
+      loadOrders()
+    }
+  }
+
+  const handleViewChange = (view) => {
+    setCurrentView(view)
+  }
+
+  const handleFilterChange = (filter) => {
+    setOrderFilter(filter)
   }
 
   useEffect(() => {
@@ -144,27 +214,44 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box sx={{ display: 'flex', height: '100vh' }}>
-        <Sidebar currentView={currentView} onViewChange={setCurrentView} onFilterChange={setOrderFilter} />
-        <Box component="main" sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-          <TopBar 
-            onViewChange={setCurrentView} 
-            currentView={currentView}
-            onNewOrder={() => setOpenNewOrder(true)}
-          />
-          {currentView === 'orders' ? (
-            <DragDropContext onDragEnd={handleDragEnd}>
-              <OrderManager orders={orders} onDragEnd={handleDragEnd} filter={orderFilter} />
-            </DragDropContext>
-          ) : (
-            <MenuManager categories={categories} setCategories={setCategories} />
-          )}
-        </Box>
-        <NewOrder 
-          open={openNewOrder} 
-          onClose={handleNewOrder}
-          categories={categories}
+      <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+        <Sidebar
+          currentView={currentView}
+          onViewChange={handleViewChange}
+          onFilterChange={setOrderFilter}
         />
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            overflow: 'auto',
+            pt: 3,
+            pb: 1,
+            pl: 0
+          }}
+        >
+          <Container maxWidth="lg" sx={{ pl: 3 }}>
+            <DragDropContext onDragEnd={handleDragEnd}>
+              {currentView === 'orders' && (
+                <OrderManager
+                  orders={orders}
+                  onStatusChange={handleStatusChange}
+                  filter={orderFilter}
+                  categories={categories}
+                />
+              )}
+              {currentView === 'menu' && (
+                <MenuManager
+                  categories={categories}
+                  setCategories={setCategories}
+                />
+              )}
+              {currentView === 'neighborhoods' && (
+                <NeighborhoodManager />
+              )}
+            </DragDropContext>
+          </Container>
+        </Box>
       </Box>
     </ThemeProvider>
   )

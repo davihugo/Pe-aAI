@@ -17,93 +17,150 @@ import {
   Fab,
   Grid,
   MenuItem,
+  CircularProgress,
+  Alert,
 } from '@mui/material'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import FastfoodIcon from '@mui/icons-material/Fastfood'
 
-const initialCategories = [
-  {
-    id: 1,
-    name: 'Burgers',
-    items: [
-      { id: 1, name: 'X-Burger', price: 18.90, description: 'Pão, hambúrguer, queijo, alface e tomate' },
-      { id: 2, name: 'X-Bacon', price: 22.90, description: 'Pão, hambúrguer, bacon, queijo, alface e tomate' },
-    ]
-  },
-  {
-    id: 2,
-    name: 'Pizzas',
-    items: [
-      { id: 3, name: 'Margherita', price: 45.90, description: 'Molho de tomate, mussarela e manjericão' },
-      { id: 4, name: 'Calabresa', price: 42.90, description: 'Molho de tomate, calabresa e cebola' },
-    ]
-  }
-]
-
-const MenuManager = ({ categories, setCategories }) => {
+const MenuManager = () => {
+  const [categories, setCategories] = useState([])
   const [openCategoryDialog, setOpenCategoryDialog] = useState(false)
   const [openItemDialog, setOpenItemDialog] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState(null)
   const [newCategory, setNewCategory] = useState({ name: '' })
   const [newItem, setNewItem] = useState({ name: '', price: '', description: '', categoryId: '' })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  const handleAddCategory = () => {
+  useEffect(() => {
+    fetchCategories()
+  }, [])
+
+  const fetchCategories = async () => {
+    try {
+      const response = await fetch('http://localhost:8080/api/categories')
+      if (!response.ok) {
+        throw new Error('Failed to fetch menu categories')
+      }
+      const data = await response.json()
+      setCategories(data)
+      setError(null)
+    } catch (err) {
+      setError('Erro ao carregar o cardápio. Por favor, tente novamente.')
+      console.error('Error fetching categories:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleAddCategory = async () => {
     if (newCategory.name.trim()) {
-      const newCategoryObj = {
-        id: Date.now(),
-        name: newCategory.name,
-        items: []
+      try {
+        const response = await fetch('http://localhost:8080/api/categories', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(newCategory)
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to add category')
+        }
+
+        await fetchCategories()
+        setNewCategory({ name: '' })
+        setOpenCategoryDialog(false)
+      } catch (err) {
+        console.error('Error adding category:', err)
+        setError('Erro ao adicionar categoria. Por favor, tente novamente.')
       }
-      setCategories([...categories, newCategoryObj])
-      setNewCategory({ name: '' })
-      setOpenCategoryDialog(false)
     }
   }
 
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (newItem.name && newItem.price && newItem.categoryId) {
-      const updatedCategories = categories.map(category => {
-        if (category.id === parseInt(newItem.categoryId)) {
-          return {
-            ...category,
-            items: [...category.items, {
-              id: Date.now(),
-              name: newItem.name,
-              price: parseFloat(newItem.price),
-              description: newItem.description
-            }]
-          }
+      try {
+        const response = await fetch(`http://localhost:8080/api/categories/${newItem.categoryId}/items`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: newItem.name,
+            price: parseFloat(newItem.price),
+            description: newItem.description
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to add item')
         }
-        return category
-      })
-      setCategories(updatedCategories)
-      setNewItem({ name: '', price: '', description: '', categoryId: '' })
-      setOpenItemDialog(false)
+
+        await fetchCategories()
+        setNewItem({ name: '', price: '', description: '', categoryId: '' })
+        setOpenItemDialog(false)
+      } catch (err) {
+        console.error('Error adding item:', err)
+        setError('Erro ao adicionar item. Por favor, tente novamente.')
+      }
     }
   }
 
-  const handleDeleteCategory = (categoryId) => {
-    setCategories(categories.filter(category => category.id !== categoryId))
+  const handleDeleteCategory = async (categoryId) => {
+    try {
+      const response = await fetch(`http://localhost:8080/api/categories/${categoryId}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete category')
+      }
+
+      await fetchCategories()
+    } catch (err) {
+      console.error('Error deleting category:', err)
+      setError('Erro ao excluir categoria. Por favor, tente novamente.')
+    }
   }
 
-  const handleDeleteItem = (categoryId, itemId) => {
-    const updatedCategories = categories.map(category => {
-      if (category.id === categoryId) {
-        return {
-          ...category,
-          items: category.items.filter(item => item.id !== itemId)
-        }
+  const handleDeleteItem = async (categoryId, itemId) => {
+    try {
+      const response = await fetch(`http://localhost:8080/api/categories/${categoryId}/items/${itemId}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete item')
       }
-      return category
-    })
-    setCategories(updatedCategories)
+
+      await fetchCategories()
+    } catch (err) {
+      console.error('Error deleting item:', err)
+      setError('Erro ao excluir item. Por favor, tente novamente.')
+    }
+  }
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    )
   }
 
   return (
     <Box sx={{ p: 3 }}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
           Gerenciador de Cardápio
@@ -134,7 +191,7 @@ const MenuManager = ({ categories, setCategories }) => {
               </Box>
               
               <List>
-                {category.items.map((item) => (
+                {category.items?.map((item) => (
                   <Box key={item.id}>
                     <ListItem>
                       <ListItemText
@@ -205,6 +262,7 @@ const MenuManager = ({ categories, setCategories }) => {
             variant="outlined"
             value={newItem.categoryId}
             onChange={(e) => setNewItem({ ...newItem, categoryId: e.target.value })}
+            sx={{ mb: 2 }}
           >
             {categories.map((category) => (
               <MenuItem key={category.id} value={category.id}>
@@ -219,6 +277,7 @@ const MenuManager = ({ categories, setCategories }) => {
             variant="outlined"
             value={newItem.name}
             onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+            sx={{ mb: 2 }}
           />
           <TextField
             margin="dense"
@@ -228,6 +287,7 @@ const MenuManager = ({ categories, setCategories }) => {
             type="number"
             value={newItem.price}
             onChange={(e) => setNewItem({ ...newItem, price: e.target.value })}
+            sx={{ mb: 2 }}
           />
           <TextField
             margin="dense"
